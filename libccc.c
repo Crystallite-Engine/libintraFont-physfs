@@ -242,7 +242,7 @@ int cccLoadTable(const char *filename, unsigned char cp) {
 #else 
     if (!fd) return CCC_ERROR_FILE_READ;
 #endif
-    unsigned int filesize = PHYSFS_tell(fd);
+    unsigned int filesize = PHYSFS_fileLength(fd);
     FILE_SEEK(fd, 0, SEEK_SET);
     void* table_data = (void*)malloc(filesize);
   if (!table_data) {
