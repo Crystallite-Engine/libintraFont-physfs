@@ -1,3 +1,4 @@
+#pragma once
 /*
  * intraFont.h
  * This file is used to display the PSP's internal font (pgf and bwfon firmware files)

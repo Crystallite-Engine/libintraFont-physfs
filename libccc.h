@@ -1,3 +1,4 @@
+#pragma once
 /*
  * libccc.h
  * Character Code Conversion Library

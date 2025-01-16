@@ -1,3 +1,4 @@
+#pragma once
 /*
  * libccc.c
  * Character Code Conversion Library
@@ -25,14 +26,13 @@
 #define FILE_TELL(a, b)
 #define FILE_TYPE SceUID
 #else
-#define FILE_OPEN_R(name) fopen(name, "rb")
-#define FILE_OPEN_W(name) fopen(name, "wb")
-#define FILE_SEEK(handle, offset, origin) fseek(handle, offset, origin)
-#define FILE_READ(file, data, size) fread(data, 1, size, file)
-#define FILE_WRITE(file, data, size) fwrite(data, 1, size, file)
-#define FILE_CLOSE(handle) fclose(handle)
-#define FILE_TELL(handle, output) output = ftell(handle)
-#define FILE_TYPE FILE*
+#define FILE_OPEN_R(name) PHYSFS_openRead(name)
+#define FILE_OPEN_W(name) PHYSFS_openWrite(name)
+#define FILE_SEEK(handle, offset, origin) PHYSFS_seek(handle, offset)
+#define FILE_READ(file, data, size) PHYSFS_readBytes(file, data, size)
+#define FILE_WRITE(file, data, size) PHYSFS_writeBytes(file, data, size)
+#define FILE_CLOSE(handle) PHYSFS_close(handle)
+#define FILE_TYPE PHYSFS_File*
 #endif
 
 #if defined(_PSP)
@@ -117,14 +117,14 @@ int cccLZRDecompress(void *out, unsigned int out_capacity, void *in, void *in_en
   char flag;
   
   signed char type = *(signed char*)in;
-  unsigned int buffer = ((unsigned int)*(unsigned char*)(in+1) << 24) + 
-                        ((unsigned int)*(unsigned char*)(in+2) << 16) + 
-                        ((unsigned int)*(unsigned char*)(in+3) <<  8) + 
-                        ((unsigned int)*(unsigned char*)(in+4)      );  
-  next_in = (in_end) ? in_end : &tmp; //use user provided counter if available
-  *next_in = in + 5;
-  next_out = out;
-  out_end = out + out_capacity;
+  unsigned int buffer = ((unsigned int)*(unsigned char*)((unsigned char*)in+1) << 24) +
+                        ((unsigned int)*(unsigned char*)((unsigned char*)in+2) << 16) +
+                        ((unsigned int)*(unsigned char*)((unsigned char*)in+3) <<  8) +
+                        ((unsigned int)*(unsigned char*)((unsigned char*)in+4)      );
+  next_in = (in_end) ? (unsigned char**) in_end : (unsigned char**) &tmp; //use user provided counter if available
+  *next_in = (unsigned char*)in + 5;
+  next_out = (unsigned char*)out;
+  out_end = (unsigned char*)out + out_capacity;
 
   if (type < 0) { 
     
@@ -225,7 +225,7 @@ int cccSetTable(void* table, unsigned int bytesize, unsigned char cp, unsigned c
     if (__table_dyn__[cp] && __table_ptr__[cp]) 
       free(__table_ptr__[cp]);
     __table_ptr__[cp] = table;
-    __table_end__[cp] = table+bytesize;
+    __table_end__[cp] = (unsigned char*)table+bytesize;
     __table_dyn__[cp] = dyn;
     return CCC_SUCCESS;
   } else 
@@ -242,8 +242,7 @@ int cccLoadTable(const char *filename, unsigned char cp) {
 #else 
     if (!fd) return CCC_ERROR_FILE_READ;
 #endif
-    unsigned int filesize = FILE_SEEK(fd, 0, SEEK_END);
-    FILE_TELL(fd, filesize);
+    unsigned int filesize = PHYSFS_tell(fd);
     FILE_SEEK(fd, 0, SEEK_SET);
     void* table_data = (void*)malloc(filesize);
   if (!table_data) {
@@ -266,7 +265,7 @@ int cccLoadTable(const char *filename, unsigned char cp) {
         free(table_data);
         return CCC_ERROR_MEM_ALLOC;
       }
-      int ret = cccLZRDecompress(table, header[4], table_data+header[2], NULL);
+      int ret = cccLZRDecompress(table, header[4], (unsigned int*)table_data+header[2], NULL);
       if (ret < 0) {
         free(table_data);
         free(table);

@@ -1,3 +1,6 @@
+#pragma once
+#define LOG_PREFIX_FONT "intraFont: "
+#include "libccc.c"
 /*
  * intraFont.c
  * This file is used to display the PSP's internal font (pgf and bwfon firmware files)
@@ -14,13 +17,8 @@
  */
 
 #if defined(__WIN32) || defined(__WIN64)
-#include <windows.h>
-#include <GLFW/galo.h>
-#include <GLFW/glfw3.h>
 #define memalign(a, b) malloc(b)
-#define INFO(msg) \
-    fprintf(stderr, "info: %s:%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, "%s\n" , msg);
+#define INFO(msg) LOG_ERROR(LOG_PREFIX_FONT << " " __FILE__ << ":" << __LINE__ << " : " << msg);
 #define DESKTOP 1
 #endif
 #if defined(_PSP)
@@ -39,7 +37,7 @@
 #include <string.h>
 #include <malloc.h>
 #include <math.h>
-#include <intraFont.h>
+#include "intraFont.h"
 #if defined(_OSLIB_H_)
 #define OSLIB_FREE(a) free((a))
 #else 
@@ -65,13 +63,13 @@ unsigned long intraFontGetV(unsigned long n, unsigned char *p, unsigned long *b)
 	return v;
 }
 
-unsigned long *intraFontGetTable(FILE *file, unsigned long n_elements, unsigned long bp_element)
+unsigned long *intraFontGetTable(PHYSFS_File *file, unsigned long n_elements, unsigned long bp_element)
 {
 	unsigned long len_table = ((n_elements * bp_element + 31) / 32) * 4;
 	unsigned char *raw_table = (unsigned char *)malloc(len_table * sizeof(unsigned char));
 	if (raw_table == NULL)
 		return NULL;
-	if (fread(raw_table, len_table * sizeof(unsigned char), 1, file) != 1)
+	if (PHYSFS_readBytes(file, raw_table, len_table * sizeof(unsigned char)) != len_table * sizeof(unsigned char))
 	{
 		free(raw_table);
 		return NULL;
@@ -577,19 +575,16 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 	VirtualFileClose(f);
 	FILE *file = fmemopen((void *)input, input_size, "rb");
 #else
-	FILE *file = fopen(filename, "rb"); /* read from the file in binary mode */
+	PHYSFS_File *file = PHYSFS_openRead(filename); /* read from the file in binary mode */
 #endif
-	if (!file)
-		return NULL;
-	fseek(file, 0, SEEK_END);
-	unsigned long filesize = ftell(file);
-	fseek(file, 0, SEEK_SET);
+	if (!file) return NULL;
+	const unsigned long filesize = PHYSFS_fileLength(file);
 
 	//read pgf header
 	static PGF_Header header;
-	if (fread(&header, sizeof(PGF_Header), 1, file) != 1)
+	if (PHYSFS_readBytes(file, &header, sizeof(PGF_Header)) != sizeof(PGF_Header))
 	{
-		fclose(file);
+		PHYSFS_close(file);
 		OSLIB_FREE((void *)input_free);
 		return NULL;
 	}
@@ -607,7 +602,7 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 	}
 	else
 	{
-		fclose(file);
+		PHYSFS_close(file);
 		OSLIB_FREE((void *)input_free);
 		return NULL;
 	}
@@ -629,7 +624,7 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 		font->charmap = (unsigned short *)malloc(header.charmap_len * sizeof(unsigned short));
 		if (!font->glyph || !font->shadowGlyph || !font->charmap_compr || !font->charmap)
 		{
-			fclose(file);
+			PHYSFS_close(file);
 			OSLIB_FREE((void *)input_free);
 			intraFontUnload(font);
 			return NULL;
@@ -654,7 +649,7 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 		font->charmap = NULL;									  //not needed for bwfon
 		if (!font->glyphBW)
 		{
-			fclose(file);
+			PHYSFS_close(file);
 			OSLIB_FREE((void *)input_free);
 			intraFontUnload(font);
 			return NULL;
@@ -690,7 +685,7 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 	font->fontdata = NULL;
 	if (!font->filename || !font->texture)
 	{
-		fclose(file);
+		PHYSFS_close(file);
 		OSLIB_FREE((void *)input_free);
 		intraFontUnload(font);
 		return NULL;
@@ -702,19 +697,19 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 	{
 
 		//read advance table
-		fseek(file, header.header_len + (header.table1_len + header.table2_len + header.table3_len) * 8, SEEK_SET);
+		PHYSFS_seek(file, header.header_len + (header.table1_len + header.table2_len + header.table3_len) * 8);
 		signed long *advancemap = (signed long *)malloc(header.advance_len * sizeof(signed long) * 2);
 		if (!advancemap)
 		{
-			fclose(file);
+			PHYSFS_close(file);
 			OSLIB_FREE((void *)input_free);
 			intraFontUnload(font);
 			return NULL;
 		}
-		if (fread(advancemap, header.advance_len * sizeof(signed long) * 2, 1, file) != 1)
+		if (PHYSFS_readBytes(file, advancemap, header.advance_len * sizeof(signed long) * 2) != header.advance_len * sizeof(signed long) * 2)
 		{
 			free(advancemap);
-			fclose(file);
+			PHYSFS_close(file);
 			intraFontUnload(font);
 			return NULL;
 		}
@@ -725,7 +720,7 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 		{
 			/* change logic here to allow zero shadow fonts */
 			free(advancemap);
-			fclose(file);
+			PHYSFS_close(file);
 			OSLIB_FREE((void *)input_free);
 			intraFontUnload(font);
 			return NULL;
@@ -734,11 +729,11 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 		//version 6.3 charmap compression
 		if (header.revision == 3)
 		{
-			if (fread(font->charmap_compr, font->charmap_compr_len * sizeof(unsigned short) * 2, 1, file) != 1)
+			if (PHYSFS_readBytes(file, font->charmap_compr, font->charmap_compr_len * sizeof(unsigned short) * 2) != font->charmap_compr_len * sizeof(unsigned short) * 2)
 			{
 				free(advancemap);
 				free(ucs_shadowmap);
-				fclose(file);
+				PHYSFS_close(file);
 				OSLIB_FREE((void *)input_free);
 				intraFontUnload(font);
 				return NULL;
@@ -753,11 +748,11 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 		//read charmap
 		if (header.charmap_bpe == 16)
 		{ //read directly from file...
-			if (fread(font->charmap, header.charmap_len * sizeof(unsigned short), 1, file) != 1)
+			if (PHYSFS_readBytes(file, font->charmap, header.charmap_len * sizeof(unsigned short)) != header.charmap_len * sizeof(unsigned short))
 			{
 				free(advancemap);
 				free(ucs_shadowmap);
-				fclose(file);
+				PHYSFS_close(file);
 				OSLIB_FREE((void *)input_free);
 				intraFontUnload(font);
 				return NULL;
@@ -770,7 +765,7 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 			{
 				free(advancemap);
 				free(ucs_shadowmap);
-				fclose(file);
+				PHYSFS_close(file);
 				OSLIB_FREE((void *)input_free);
 				intraFontUnload(font);
 				return NULL;
@@ -789,14 +784,14 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 		{
 			free(advancemap);
 			free(ucs_shadowmap);
-			fclose(file);
+			PHYSFS_close(file);
 			OSLIB_FREE((void *)input_free);
 			intraFontUnload(font);
 			return NULL;
 		}
 
 		//read raw fontdata
-		unsigned long start_fontdata = ftell(file);
+		unsigned long start_fontdata = PHYSFS_tell(file);
 		unsigned long len_fontdata = filesize - start_fontdata;
 		font->fontdata = (unsigned char *)malloc(len_fontdata * sizeof(unsigned char));
 		if (font->fontdata == NULL)
@@ -804,24 +799,24 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 			free(advancemap);
 			free(ucs_shadowmap);
 			free(charptr);
-			fclose(file);
+			PHYSFS_close(file);
 			OSLIB_FREE((void *)input_free);
 			intraFontUnload(font);
 			return NULL;
 		}
-		if (fread(font->fontdata, len_fontdata * sizeof(unsigned char), 1, file) != 1)
+		if (PHYSFS_readBytes(file, font->fontdata, len_fontdata * sizeof(unsigned char)) != len_fontdata * sizeof(unsigned char))
 		{
 			free(advancemap);
 			free(ucs_shadowmap);
 			free(charptr);
-			fclose(file);
+			PHYSFS_close(file);
 			OSLIB_FREE((void *)input_free);
 			intraFontUnload(font);
 			return NULL;
 		}
 
 		//close file
-		fclose(file);
+		PHYSFS_close(file);
 		OSLIB_FREE((void *)input_free);
 
 		//count ascii chars and reduce mem required
@@ -936,18 +931,18 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 	{ //FILETYPE_BWFON
 
 		//read raw fontdata
-		fseek(file, 0, SEEK_SET);
+		PHYSFS_seek(file, 0);
 		font->fontdata = (unsigned char *)malloc((filesize + 40) * sizeof(unsigned char));
 		if (font->fontdata == NULL)
 		{
-			fclose(file);
+			PHYSFS_close(file);
 			OSLIB_FREE((void *)input_free);
 			intraFontUnload(font);
 			return NULL;
 		}
-		if (fread(font->fontdata, filesize * sizeof(unsigned char), 1, file) != 1)
+		if (PHYSFS_readBytes(file, font->fontdata, filesize * sizeof(unsigned char)) != filesize * sizeof(unsigned char))
 		{
-			fclose(file);
+			PHYSFS_close(file);
 			OSLIB_FREE((void *)input_free);
 			intraFontUnload(font);
 			return NULL;
@@ -955,7 +950,7 @@ intraFont *intraFontLoad(const char *filename, unsigned int options)
 		memcpy(font->fontdata + filesize, bw_shadow, 40);
 
 		//close file
-		fclose(file);
+		PHYSFS_close(file);
 		OSLIB_FREE((void *)input_free);
 
 		//count ascii chars and reduce mem required: no ascii chars in bwfon -> abort
@@ -1063,7 +1058,7 @@ static inline void intraFontActivate_PC(intraFont *font){
 #else
 		glTexImage2D(GL_TEXTURE_2D,	0, GL_RGBA8, font->texWidth, font->texWidth,0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, font->texture);
 #endif
-		printf("Texture uploaded!\n");
+		LOG_DEBUG(LOG_PREFIX_FONT << "Texture uploaded!");
 		font->options &= ~INTRAFONT_DIRTY;
 	}
 }	
@@ -1940,7 +1935,7 @@ float intraFontPrintColumnUCS2Ex(intraFont *font, float x, float y, float column
 		}
 		font->v = (struct fontVertex*)malloc(VERTEX_PER_QUAD * (n_glyphs + n_sglyphs) * sizeof(fontVertex));
 		font->v_size = VERTEX_PER_QUAD * (n_glyphs + n_sglyphs) * sizeof(fontVertex);
-		printf("%s font->v size =\t %d\n", font->filename, font->v_size);
+		LOG_INFO(LOG_PREFIX_FONT << font->filename << " font->v size = " << font->v_size);
 	} 
 	v_buffer = font->v;
 	memset(v_buffer, 0, VERTEX_PER_QUAD * (n_glyphs + n_sglyphs) * sizeof(fontVertex));
